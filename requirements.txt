@@ -1,0 +1,6 @@
+fabric>=2.0
+asyncssh>=2.21
+pyte>=0.8
+websockets>=14
+mcp>=1.2
+fastapi>=0.100

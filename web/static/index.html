@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Term.AI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; background: #1e1e1e; color: #d4d4d4; font-family: monospace; }
+
+        #terminal { height: 100%; padding: 4px; display: none; }
+
+        #overlay {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #connect-box {
+            background: #252526; border: 1px solid #3c3c3c; border-radius: 6px;
+            padding: 32px; width: 320px; display: flex; flex-direction: column; gap: 14px;
+        }
+        #connect-box h1 { font-size: 16px; font-weight: normal; letter-spacing: 0.05em; color: #9cdcfe; }
+        #connect-box input {
+            background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 3px;
+            color: #d4d4d4; font-family: monospace; font-size: 13px;
+            padding: 7px 10px; outline: none; width: 100%;
+        }
+        #connect-box input:focus { border-color: #569cd6; }
+        #connect-btn {
+            background: #0e639c; border: none; border-radius: 3px; color: #fff;
+            cursor: pointer; font-family: monospace; font-size: 13px; padding: 8px;
+        }
+        #connect-btn:hover { background: #1177bb; }
+        #connect-btn:disabled { opacity: 0.5; cursor: default; }
+        #error { color: #f48771; font-size: 12px; min-height: 16px; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <div id="connect-box">
+            <h1>Term.AI</h1>
+            <input id="host" type="text" placeholder="host or IP" autocomplete="off" />
+            <input id="username" type="text" placeholder="username" autocomplete="off" />
+            <input id="password" type="password" placeholder="password" />
+            <button id="connect-btn">Connect</button>
+            <div id="error"></div>
+        </div>
+    </div>
+    <div id="terminal"></div>
+
+    <script>
+        const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
+        const fit = new FitAddon.FitAddon();
+        term.loadAddon(fit);
+
+        let ws = null;
+
+        function openTerminal() {
+            document.getElementById('overlay').style.display = 'none';
+            const termEl = document.getElementById('terminal');
+            termEl.style.display = 'block';
+            term.open(termEl);
+            fit.fit();
+
+            ws = new WebSocket(`ws://${location.host}/ws`);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+                term.focus();
+            };
+            ws.onmessage = (e) => term.write(new Uint8Array(e.data));
+            ws.onclose = () => {
+                term.write('\r\n\x1b[31mDisconnected.\x1b[0m\r\n');
+                document.getElementById('overlay').style.display = 'flex';
+                document.getElementById('terminal').style.display = 'none';
+                document.getElementById('error').textContent = '';
+            };
+        }
+
+        window.addEventListener('resize', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                fit.fit();
+                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+            }
+        });
+
+        term.onData((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN)
+                ws.send(new TextEncoder().encode(data));
+        });
+
+        document.getElementById('connect-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('connect-btn');
+            const err = document.getElementById('error');
+            btn.disabled = true;
+            btn.textContent = 'Connecting…';
+            err.textContent = '';
+
+            try {
+                const res = await fetch('/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host:     document.getElementById('host').value,
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    openTerminal();
+                } else {
+                    err.textContent = data.reason;
+                }
+            } catch {
+                err.textContent = 'Could not reach server.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Connect';
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && document.getElementById('overlay').style.display !== 'none')
+                document.getElementById('connect-btn').click();
+        });
+    </script>
+</body>
+</html>
