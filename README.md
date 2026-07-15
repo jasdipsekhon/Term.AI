@@ -44,6 +44,8 @@ In a Claude Desktop chat, ask Claude to connect to your device:
 
 > "Connect to 192.168.1.100 as admin, pw: root, and run whoami."
 
+Use Term.AI MCP server to open an SSH session with 192.168.11.230 as builder, password: root
+
 Claude will use the SSH tools automatically. Open `http://127.0.0.1:8765` in a browser to watch the terminal live.
 
 ## Troubleshooting

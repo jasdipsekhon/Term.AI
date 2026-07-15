@@ -30,7 +30,7 @@ def http_handshake(headers):
        f"Sec-WebSocket-Accept: {base64_encoded_hash}\r\n\r\n"
    ).encode()
 
-# WebSocket frame layout (big endian, network byte order):
+# WebSocket frame layout (big endian):
 #
 # byte 0:       bit 7 = FIN, bits 6-4 = RSV1-3 (ignore), bits 3-0 = opcode
 # byte 1:       bit 7 = MASK, bits 6-0 = payload length (7 bits, value 0-127)
@@ -76,7 +76,12 @@ async def read_frame(reader):
 
 def write_frame(writer, data, opcode):
     buf = bytearray()
-    buf.append
+    buf.append(0x80 | opcode)
+    n = len(data)
+    while n:
+        buf += bytearray(data)
+        n-=1
+    writer.write(buf)
 
 def _handle():
     pass
