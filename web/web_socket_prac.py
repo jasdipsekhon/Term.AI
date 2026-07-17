@@ -12,6 +12,10 @@ Flow:
 3. Compute accept key, send 101
 4. Loop: read frames, write frames to the client
 """
+RECV_BUF = 4096
+TWO_BYTE_LENGTH_FIELD = 126
+EIGHT_BYTE_LENGTH_FIELD = 127
+
 magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 def http_handshake(headers):
@@ -59,10 +63,10 @@ async def read_frame(reader):
     opcode = header[0] & 0x0F 
     mask = (header[1] >> 7) & 1
     length = header[1] & 0x7F
-    if length == 126:
+    if length == TWO_BYTE_LENGTH_FIELD:
         buf = await reader.readexactly(2)
         length = buf[0] << 8 | buf[1]
-    elif length == 127:
+    elif length == EIGHT_BYTE_LENGTH_FIELD:
         buf = await reader.readexactly(8)
         length = buf[0] << 56 | buf[1] << 48 | buf[2] << 40 | buf[3] << 32 | buf[4] << 24 | buf[5] << 16 | buf[6] << 8 | buf[7]
     if mask:
@@ -78,13 +82,39 @@ def write_frame(writer, data, opcode):
     buf = bytearray()
     buf.append(0x80 | opcode)
     n = len(data)
-    while n:
-        buf += bytearray(data)
-        n-=1
+    if n < TWO_BYTE_LENGTH_FIELD:
+        buf.append(n)
+    elif n <= 0xFFFF:
+        buf.append(TWO_BYTE_LENGTH_FIELD)
+        buf.append(n >> 8 & 0xFF)
+        buf.append(n & 0xFF)
+    else:
+        buf.append(EIGHT_BYTE_LENGTH_FIELD)
+        i = 56
+        while i >= 0:
+            buf.append((n >> i) & 0xFF)
+            i -= 8
+    buf += data
     writer.write(buf)
 
-def _handle():
-    pass
+async def _parse_http_header(reader):
+    http_bytes = b""
+    while b"\r\n\r\n" not in http_bytes:
+        buf = await reader.read(RECV_BUF)
+        http_bytes += buf
+    http_header = http_bytes.split(b"\r\n\r\n", 1)[0]
+    http_header_str = http_header.decode("utf-8", errors="replace")
+    headers = {}
+    for line in http_header_str.split("\r\n")[1:]:
+        if ": " in line:
+            key, value = line.split(": ", 1)
+            headers[key] = value
+    return headers
+
+async def _handle(reader, writer):
+    http_headers = await _parse_http_header(reader)
+    writer.write(http_handshake(http_headers))
+    await writer.drain()
 
 def start_web_socket_server(reader, writer):
     pass
