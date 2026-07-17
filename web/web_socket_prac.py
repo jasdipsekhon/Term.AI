@@ -115,6 +115,19 @@ async def _handle(reader, writer):
     http_headers = await _parse_http_header(reader)
     writer.write(http_handshake(http_headers))
     await writer.drain()
+    try:
+        while True:
+            opcode, payload = await read_frame(reader)
+            if opcode == 0x8:
+                break
+            elif opcode == 0x1 or opcode == 0x2:
+                write_frame(writer, payload, opcode)
+    except asyncio.IncompleteReadError:
+        pass
+    except Exception as e:
+        print(f"Error reading frame: {e}", flush=True)
+    finally:
+        writer.close()
 
 def start_web_socket_server(reader, writer):
     pass
