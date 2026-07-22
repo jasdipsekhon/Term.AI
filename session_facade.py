@@ -1,6 +1,9 @@
 import asyncio
 from ssh_session import SSHSession
 
+# Facade over SSHSession. One PTY (one SSH connection) is held in ssh_session.
+# Both MCP and WebSocket reach the same PTY through this shared reference.
+
 ssh_session = None # The current active SSH session
 _host = None
 _username = None
