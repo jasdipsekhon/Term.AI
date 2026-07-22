@@ -8,7 +8,7 @@ _lock = asyncio.Lock()
 ssh_session_changed = asyncio.Event() 
 
 
-def notifyssh_session_changed():
+def notify_ssh_session_changed():
     global ssh_session_changed
     ssh_session_changed.set()
     ssh_session_changed = asyncio.Event()
@@ -21,11 +21,11 @@ def _make_disconnect_handler(session):
             ssh_session = None
             _host = None
             _username = None
-            notifyssh_session_changed()
+            notify_ssh_session_changed()
     return handler
 
 
-async def openssh_session(host, username, password):
+async def open_ssh_session(host, username, password):
     global ssh_session, _host, _username
     async with _lock:
         if ssh_session is not None:
@@ -35,13 +35,13 @@ async def openssh_session(host, username, password):
                 pass
             ssh_session = None
         try:
-            newssh_session = SSHSession(host, username, password)
-            await newssh_session.start_ssh_client()
-            newssh_session.ssh_client.on_disconnect = _make_disconnect_handler(newssh_session)
-            ssh_session = newssh_session
+            new_ssh_session = SSHSession(host, username, password)
+            await new_ssh_session.start_ssh_client()
+            new_ssh_session.ssh_client.on_disconnect = _make_disconnect_handler(new_ssh_session)
+            ssh_session = new_ssh_session
             _host = host
             _username = username
-            notifyssh_session_changed()
+            notify_ssh_session_changed()
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "reason": str(e)}

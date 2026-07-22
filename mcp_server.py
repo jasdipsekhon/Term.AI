@@ -16,7 +16,7 @@ async def open_session(host: str, username: str, password: str):
     Returns {"ok": True} on success, or {"ok": False, "reason": "..."} on failure.
     On failure, no session is open — check credentials and retry before calling other tools.
     """
-    return await session_state.open_session(host, username, password)
+    return await session_state.open_ssh_session(host, username, password)
 
 
 @mcp.tool()
