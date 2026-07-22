@@ -61,7 +61,7 @@ browser) call `Session.write()` directly; there is no arbitration layer.
 | `ssh_client.py` | asyncssh-based SSH transport with PTY allocation and resize support |
 | `mcp_server.py` | FastMCP server exposing the MCP tools |
 | `session_state.py` | Shared session reference, disconnect handler, and session-change event used by both MCP tools and web server |
-| `web/web_socket.py` | FastAPI app — WebSocket streams terminal bytes to browser; `/connect` POST opens a session from the browser |
+| `web/web_socket.py` | Bare-metal asyncio TCP server — implements WebSocket protocol (RFC 6455) manually; streams terminal bytes to browser |
 | `web/static/index.html` | xterm.js browser viewer: renders output, sends keystrokes, sends resize events |
 | `main.py` | Entry point — runs MCP server (stdio) and web server (port 8765) concurrently |
 | `configure.py` | One-time setup script — writes the MCP server entry into Claude Desktop's `claude_desktop_config.json` |
@@ -92,11 +92,9 @@ Claude Desktop is the chat front end and the MCP host.
 
 ## Browser session flow
 
-The browser can open its own session independently of Claude via the `/connect`
-POST endpoint. This calls the same `session_state.open_session` path, so the MCP
-tools and the browser viewer always share one session object. When a new session
-is created or the SSH connection drops, `session_state._session_changed` fires and
-the WebSocket handler reconnects the viewer to the new session automatically.
+The MCP tools and the browser viewer share one session object via `session_state`.
+When a new session is created or the SSH connection drops, `session_state._session_changed`
+fires and the WebSocket handler reconnects the viewer to the new session automatically.
 
 ## Key design decisions
 
@@ -111,8 +109,7 @@ the WebSocket handler reconnects the viewer to the new session automatically.
   and visible lines so Claude sees output that has already scrolled off screen.
 - **Credential locality.** The server runs as a per-user local process.
   Credentials never cross the MCP boundary in logs or tool responses.
-- **Stdout isolation.** All logging is routed to stderr via a custom uvicorn
-  `log_config` so nothing corrupts the MCP JSON-RPC channel on stdout.
+- **Stdout isolation.** All logging goes to stderr so nothing corrupts the MCP JSON-RPC channel on stdout.
 - **Session-change eventing.** `session_state._session_changed` is an
   `asyncio.Event` that is replaced (not just set) on each change, so the WebSocket
   handler can wait on it without missing back-to-back transitions.

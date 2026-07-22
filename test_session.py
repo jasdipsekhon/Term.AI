@@ -2,6 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import patch
 from session import Session
+from web.web_socket import read_frame, write_frame
 
 
 def make_session():
@@ -9,7 +10,41 @@ def make_session():
         s = Session("host", "user", "pass")
     return s
 
+class TestWebSocketReadFrameUnmasked(unittest.IsolatedAsyncioTestCase):
+    async def test_read_frame(self):
+        # 1000 0001, 0000 0101
+        reader = asyncio.StreamReader()
+        payload = b"hello"
+        frame = bytearray([0x81, len(payload)]) + payload
+        reader.feed_data(frame)
+        self.assertEqual(await read_frame(reader), (0x1, payload))
 
+class TestWebSocketReadFrameMasked(unittest.IsolatedAsyncioTestCase):
+    # bytes = const uint8_t[]
+    # bytearray = uint8_t[]
+    async def test_read_frame(self):
+        # 1000 0001, 1000 0101
+        reader = asyncio.StreamReader()
+        payload = b"hello"
+        mask = b'\x01\x02\x03\x04'
+        mutable_payload = bytearray(payload)
+        for i in range(len(mutable_payload)):
+            mutable_payload[i] ^= mask[i % 4]
+        frame = bytearray([0x81, 0x80 | len(payload)]) + mask + mutable_payload
+        reader.feed_data(frame)
+        self.assertEqual(await read_frame(reader), (0x1, payload))
+
+class TestWebSocketWriteFrame(unittest.IsolatedAsyncioTestCase):
+    async def test_write_frame(self):
+        # 1000 0001, 0000 0101
+        from unittest.mock import MagicMock
+        writer = MagicMock()
+        payload = b"hello"
+        write_frame(writer, payload, 0x1)
+        frame = writer.write.call_args[0][0]
+        expected = bytearray([0x81, len(payload)]) + payload
+        self.assertEqual(frame, expected)
+        
 class TestOnData(unittest.TestCase):
     def test_feeds_pyte_stream(self):
         s = make_session()
@@ -25,7 +60,7 @@ class TestOnDataAsync(unittest.IsolatedAsyncioTestCase):
         s = make_session()
         received = []
 
-        async def cb(data):
+        async def cb(data, ctx):
             received.append(data)
 
         s.subscribe(cb)

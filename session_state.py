@@ -16,8 +16,8 @@ def notify_session_changed():
 
 def _make_disconnect_handler(session):
     def handler():
+        global _session, _host, _username
         if _session is session:
-            global _session, _host, _username
             _session = None
             _host = None
             _username = None

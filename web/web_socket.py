@@ -1,8 +1,6 @@
 import asyncio
 import hashlib
 import base64
-import json
-import struct
 import session_state
 
 """
@@ -111,7 +109,21 @@ async def _parse_http_header(reader):
             headers[key] = value
     return headers
 
-async def _handle(reader, writer):
+async def wait_first(tasks):
+    first_completed_task, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    return first_completed_task
+
+async def _on_ssh_output(data, ctx):
+    write_frame(ctx, data, 0x2)
+    await ctx.drain()
+
+async def tcp_connection_callback(reader, writer):
     http_headers = await _parse_http_header(reader)
     writer.write(http_handshake(http_headers))
     await writer.drain()
@@ -120,23 +132,39 @@ async def _handle(reader, writer):
         await writer.drain()
         writer.close()
         return
-    session.subscribe()
+    session_state._session.subscribe(_on_ssh_output, writer)
     try:
         while True:
-            opcode, payload = await read_frame(reader)
+            session_changed = session_state._session_changed
+            read_task = asyncio.create_task(read_frame(reader))
+            changed_task = asyncio.create_task(session_changed.wait())
+            first_completed_task = await wait_first([read_task, changed_task])
+            if changed_task in first_completed_task:
+                if session_state._session is None:
+                    write_frame(writer, b"", 0x8)
+                    await writer.drain()
+                    break
+                session_state._session.subscribe(_on_ssh_output, writer)
+                continue
+            opcode, payload = read_task.result()
             if opcode == 0x8:
                 break
             elif opcode == 0x1 or opcode == 0x2:
-                write_frame(writer, payload, opcode)
+                await session_state._session.write(payload)
+            elif opcode == 0x9:
+                write_frame(writer, payload, 0xA)
+                await writer.drain()
     except asyncio.IncompleteReadError:
         pass
     except Exception as e:
         print(f"Error reading frame: {e}", flush=True)
     finally:
+        if session_state._session is not None:
+            session_state._session.unsubscribe(_on_ssh_output)
         writer.close()
 
 async def start_web_socket_server():
-    server = await asyncio.start_server(_handle, "127.0.0.1", 8765)
+    server = await asyncio.start_server(tcp_connection_callback, "127.0.0.1", 8765)
     async with server:
         await server.serve_forever()
 

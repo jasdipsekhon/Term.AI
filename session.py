@@ -91,14 +91,14 @@ class Session:
 
     # ── WebSocket interface ──────────────────────────────────────────────────
 
-    def subscribe(self, subscriber):
-        self.subscribers.append(subscriber)
+    def subscribe(self, subscriber, ctx=None):
+        self.subscribers.append((subscriber, ctx))
 
     def unsubscribe(self, subscriber):
         self.subscribers.remove(subscriber)
 
     def _notify_subscribers(self, data):
-        for subscriber_callback in self.subscribers:
-            task = asyncio.create_task(subscriber_callback(data))
+        for subscriber_callback, ctx in self.subscribers:
+            task = asyncio.create_task(subscriber_callback(data, ctx))
             self.tasks.add(task)
             task.add_done_callback(self.tasks.discard)
