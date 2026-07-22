@@ -39,7 +39,10 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
         return {"ok": False, "reason": "No active SSH session"}
     try:
         output_start_line_index = session.line_count()
-        to_send = text + "\n" if text.isprintable() else text
+        if text.isprintable():
+            to_send = text + "\n"
+        else:
+            to_send = text
         await session.write(to_send.encode())
         result = await session.wait_until_idle(timeout_s=timeout)
         timed_out = not result["done"]
