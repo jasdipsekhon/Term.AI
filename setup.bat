@@ -6,12 +6,12 @@ echo Setting up Term.AI...
 
 python -m venv .venv
 if errorlevel 1 (
-    echo ERROR: Python not found. Install Python 3.10+ from https://python.org
+    echo ERROR: Python not found. Install Python 3.11+ from https://python.org
     pause
     exit /b 1
 )
 
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -e .
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies.
     pause

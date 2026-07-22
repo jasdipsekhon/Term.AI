@@ -39,7 +39,10 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
         return {"ok": False, "reason": "No active SSH session"}
     try:
         output_start_line_index = session.line_count()
-        await session.write((text + "\n").encode())
+        # Control sequences (Ctrl+C = \x03, EOF = \x04, etc.) must be sent raw;
+        # a trailing newline would turn an interrupt into "interrupt + Enter".
+        to_send = text + "\n" if text.isprintable() else text
+        await session.write(to_send.encode())
         result = await session.wait_until_idle(timeout_s=timeout)
         timed_out = not result["done"]
         output = session.get_output_since(output_start_line_index).strip()
@@ -56,9 +59,7 @@ async def session_status():
     or {"active": False} if no session is open.
     Call this before write_and_read_response if unsure whether a session exists.
     """
-    if session_state.ssh_session is None:
-        return {"active": False}
-    return {"active": True, "host": session_state._host, "username": session_state._username}
+    return session_state.status()
 
 
 if __name__ == "__main__":

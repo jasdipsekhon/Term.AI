@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
 import base64
+import json
+import sys
 import session_facade as session_state
 
 """
@@ -22,15 +24,19 @@ def http_handshake(headers):
     # 3. SHA1 hash that string
     # 4. Base64 encode the hash
     # 5. Send back an HTTP 101 response with that value as Sec-WebSocket-Accept
-   sec_websocket_key_with_UUID = headers.get("Sec-WebSocket-Key") + magic_UUID
-   hash_object = hashlib.sha1(sec_websocket_key_with_UUID.encode('utf-8'))
-   base64_encoded_hash = base64.b64encode(hash_object.digest()).decode('utf-8')
-   return (
-       "HTTP/1.1 101 Switching Protocols\r\n"
-       "Upgrade: websocket\r\n"
-       "Connection: Upgrade\r\n"
-       f"Sec-WebSocket-Accept: {base64_encoded_hash}\r\n\r\n"
-   ).encode()
+    # Returns None if this is not a WebSocket upgrade (no key present).
+    sec_websocket_key = headers.get("Sec-WebSocket-Key")
+    if sec_websocket_key is None:
+        return None
+    sec_websocket_key_with_UUID = sec_websocket_key + magic_UUID
+    hash_object = hashlib.sha1(sec_websocket_key_with_UUID.encode('utf-8'))
+    base64_encoded_hash = base64.b64encode(hash_object.digest()).decode('utf-8')
+    return (
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Accept: {base64_encoded_hash}\r\n\r\n"
+    ).encode()
 
 # WebSocket frame layout (big endian):
 #
@@ -99,6 +105,8 @@ async def _parse_http_header(reader):
     http_bytes = b""
     while b"\r\n\r\n" not in http_bytes:
         buf = await reader.read(RECV_BUF)
+        if not buf:  # EOF — client disconnected before completing the header
+            raise asyncio.IncompleteReadError(http_bytes, None)
         http_bytes += buf
     http_header = http_bytes.split(b"\r\n\r\n", 1)[0]
     http_header_str = http_header.decode("utf-8", errors="replace")
@@ -124,43 +132,52 @@ async def _on_ssh_output(data, ctx):
     await ctx.drain()
 
 async def tcp_connection_callback(reader, writer):
-    http_headers = await _parse_http_header(reader)
-    writer.write(http_handshake(http_headers))
-    await writer.drain()
-    if session_state.ssh_session is None:
-        write_frame(writer, b"", 0x8)
-        await writer.drain()
-        writer.close()
-        return
-    session_state.ssh_session.subscribe(_on_ssh_output, writer)
+    session = None
     try:
+        http_headers = await _parse_http_header(reader)
+        handshake = http_handshake(http_headers)
+        if handshake is None:  # not a WebSocket upgrade — ignore
+            return
+        writer.write(handshake)
+        await writer.drain()
+        session = session_state.ssh_session
+        if session is None:
+            write_frame(writer, b"", 0x8)
+            await writer.drain()
+            return
+        session.subscribe(_on_ssh_output, writer)
         while True:
             session_changed = session_state.ssh_session_changed
             read_task = asyncio.create_task(read_frame(reader))
             changed_task = asyncio.create_task(session_changed.wait())
             first_completed_task = await wait_first([read_task, changed_task])
             if changed_task in first_completed_task:
-                if session_state.ssh_session is None:
+                session = session_state.ssh_session
+                if session is None:
                     write_frame(writer, b"", 0x8)
                     await writer.drain()
                     break
-                session_state.ssh_session.subscribe(_on_ssh_output, writer)
+                session.subscribe(_on_ssh_output, writer)
                 continue
             opcode, payload = read_task.result()
             if opcode == 0x8:
                 break
-            elif opcode == 0x1 or opcode == 0x2:
-                await session_state.ssh_session.write(payload)
+            elif opcode == 0x1:
+                msg = json.loads(payload)
+                if msg.get('type') == 'resize':
+                    await session.resize(msg['cols'], msg['rows'])
+            elif opcode == 0x2:
+                await session.write(payload)
             elif opcode == 0x9:
                 write_frame(writer, payload, 0xA)
                 await writer.drain()
     except asyncio.IncompleteReadError:
         pass
     except Exception as e:
-        print(f"Error reading frame: {e}", flush=True)
+        print(f"Error reading frame: {e}", file=sys.stderr, flush=True)
     finally:
-        if session_state.ssh_session is not None:
-            session_state.ssh_session.unsubscribe(_on_ssh_output)
+        if session is not None:
+            session.unsubscribe(_on_ssh_output)
         writer.close()
 
 async def start_web_socket_server():

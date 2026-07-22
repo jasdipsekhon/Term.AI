@@ -21,12 +21,7 @@
             padding: 32px; width: 320px; display: flex; flex-direction: column; gap: 14px;
         }
         #connect-box h1 { font-size: 16px; font-weight: normal; letter-spacing: 0.05em; color: #9cdcfe; }
-        #connect-box input {
-            background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 3px;
-            color: #d4d4d4; font-family: monospace; font-size: 13px;
-            padding: 7px 10px; outline: none; width: 100%;
-        }
-        #connect-box input:focus { border-color: #569cd6; }
+        #connect-box p { font-size: 12px; color: #858585; }
         #connect-btn {
             background: #0e639c; border: none; border-radius: 3px; color: #fff;
             cursor: pointer; font-family: monospace; font-size: 13px; padding: 8px;
@@ -40,9 +35,7 @@
     <div id="overlay">
         <div id="connect-box">
             <h1>Term.AI</h1>
-            <input id="host" type="text" placeholder="host or IP" autocomplete="off" />
-            <input id="username" type="text" placeholder="username" autocomplete="off" />
-            <input id="password" type="password" placeholder="password" />
+            <p>Open a session via Claude first, then connect.</p>
             <button id="connect-btn">Connect</button>
             <div id="error"></div>
         </div>
@@ -63,7 +56,7 @@
             term.open(termEl);
             fit.fit();
 
-            ws = new WebSocket(`ws://${location.host}/ws`);
+            ws = new WebSocket('ws://127.0.0.1:8765');
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
@@ -91,35 +84,8 @@
                 ws.send(new TextEncoder().encode(data));
         });
 
-        document.getElementById('connect-btn').addEventListener('click', async () => {
-            const btn = document.getElementById('connect-btn');
-            const err = document.getElementById('error');
-            btn.disabled = true;
-            btn.textContent = 'Connecting…';
-            err.textContent = '';
-
-            try {
-                const res = await fetch('/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        host:     document.getElementById('host').value,
-                        username: document.getElementById('username').value,
-                        password: document.getElementById('password').value,
-                    }),
-                });
-                const data = await res.json();
-                if (data.ok) {
-                    openTerminal();
-                } else {
-                    err.textContent = data.reason;
-                }
-            } catch {
-                err.textContent = 'Could not reach server.';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Connect';
-            }
+        document.getElementById('connect-btn').addEventListener('click', () => {
+            openTerminal();
         });
 
         document.addEventListener('keydown', (e) => {

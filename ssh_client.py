@@ -1,16 +1,16 @@
 import asyncssh
 
 class SSHSessionHandler(asyncssh.SSHClientSession):
-    def __init__(self, on_data, on_disconnect):
-        self.on_data = on_data
-        self.on_disconnect = on_disconnect
+    def __init__(self, client):
+        self.client = client
 
     def data_received(self, data, _):
-        self.on_data(data)
+        self.client.on_data(data)
 
     def connection_lost(self, _):
-        if self.on_disconnect:
-            self.on_disconnect()
+        # Read on_disconnect lazily — it is assigned after connect() returns.
+        if self.client.on_disconnect:
+            self.client.on_disconnect()
 
 
 class SSHClient:
@@ -25,7 +25,7 @@ class SSHClient:
 
     async def connect(self):
         self.connection = await asyncssh.connect(self.host, username=self.username, password=self.password, known_hosts=None)
-        self.channel, _ = await self.connection.create_session(lambda: SSHSessionHandler(self.on_data, self.on_disconnect), request_pty=True, term_type='xterm-256color', encoding=None)
+        self.channel, _ = await self.connection.create_session(lambda: SSHSessionHandler(self), request_pty=True, term_type='xterm-256color', encoding=None)
 
     async def send_command(self, command):
         if self.channel is None:

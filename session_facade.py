@@ -17,6 +17,12 @@ def notify_ssh_session_changed():
     ssh_session_changed = asyncio.Event()
 
 
+def status():
+    if ssh_session is None:
+        return {"active": False}
+    return {"active": True, "host": _host, "username": _username}
+
+
 def _make_disconnect_handler(session):
     def handler():
         global ssh_session, _host, _username

@@ -13,13 +13,13 @@ class SSHSession:
         self.ssh_client = None
         self.screen = pyte.HistoryScreen(cols, rows, history=10000)  # deque of lines; each line is a dict of column_index -> Char
         self.stream = pyte.Stream(self.screen)  # parses raw bytes and updates screen
-        self.subscribers = [] # websocket subscribers
-        self.tasks = set()    # asyncio tasks for subscriber callbacks
+        self.subscriber = None  # (callback, ctx) for the connected browser viewer
+        self.tasks = set()      # asyncio tasks for subscriber callbacks
 
     def _on_data(self, data):
         bytes_to_str = data.decode("utf-8", errors="replace")
         self.stream.feed(bytes_to_str)
-        self._notify_subscribers(data)
+        self._notify_subscriber(data)
 
     async def start_ssh_client(self):
         self.ssh_client = SSHClient(self.host, self.username, self.password, self._on_data)
@@ -92,13 +92,15 @@ class SSHSession:
     # ── WebSocket interface ──────────────────────────────────────────────────
 
     def subscribe(self, subscriber, ctx=None):
-        self.subscribers.append((subscriber, ctx))
+        self.subscriber = (subscriber, ctx)
 
     def unsubscribe(self, subscriber):
-        self.subscribers.remove(subscriber)
+        self.subscriber = None
 
-    def _notify_subscribers(self, data):
-        for subscriber_callback, ctx in self.subscribers:
-            task = asyncio.create_task(subscriber_callback(data, ctx))
-            self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+    def _notify_subscriber(self, data):
+        if self.subscriber is None:
+            return
+        callback, ctx = self.subscriber
+        task = asyncio.create_task(callback(data, ctx))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
