@@ -48,21 +48,15 @@ class TestOnData(unittest.TestCase):
         s._on_data(b"hello")
         self.assertIn("hello", s.convert_screen_list_to_string())
 
-    def test_subscribers_get_called(self):
-        pass  # covered async below
-
-
-class TestOnDataAsync(unittest.IsolatedAsyncioTestCase):
-    async def test_notifies_subscribers(self):
+    def test_subscriber_gets_called(self):
         s = make_session()
         received = []
 
-        async def cb(data, ctx):
+        def cb(data, ctx):
             received.append(data)
 
         s.subscribe(cb)
         s._on_data(b"hello")
-        await asyncio.gather(*s.tasks)
         self.assertEqual(received, [b"hello"])
 
 

@@ -1,7 +1,7 @@
 ﻿from mcp.server.fastmcp import FastMCP
 import session_facade as session_state
 
-mcp = FastMCP("Term.AI", description="AI-assisted SSH terminal — share a live shell with Claude")
+mcp = FastMCP("Term.AI", instructions="AI-assisted SSH terminal — share a live shell with Claude")
 
 
 @mcp.tool()
@@ -39,8 +39,6 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
         return {"ok": False, "reason": "No active SSH session"}
     try:
         output_start_line_index = session.line_count()
-        # Control sequences (Ctrl+C = \x03, EOF = \x04, etc.) must be sent raw;
-        # a trailing newline would turn an interrupt into "interrupt + Enter".
         to_send = text + "\n" if text.isprintable() else text
         await session.write(to_send.encode())
         result = await session.wait_until_idle(timeout_s=timeout)

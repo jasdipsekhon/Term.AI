@@ -3,20 +3,48 @@ import hashlib
 import base64
 import json
 import sys
+from pathlib import Path
 import session_facade as session_state
 
 """
 Flow:
 1. TCP connection from the client (browser) arrives at the asyncio server.
 2. Read HTTP headers
-3. Compute accept key, send 101
-4. Loop: read frames, write frames to the client
+3. If Sec-WebSocket-Key is present, compute accept key, send 101, loop on frames.
+   Otherwise, serve a static file (the browser viewer) as a plain HTTP response.
 """
 RECV_BUF = 4096
 TWO_BYTE_LENGTH_FIELD = 126
 EIGHT_BYTE_LENGTH_FIELD = 127
+MAX_FRAME_SIZE = 16 * 1024 * 1024  # 16 MB cap
 
 magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+STATIC_DIR = (Path(__file__).parent / "static").resolve()
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript",
+    ".css": "text/css",
+}
+
+def http_static_response(path):
+    if path == "/":
+        path = "/index.html"
+    path = path.split("?", 1)[0]
+    file_path = (STATIC_DIR / path.lstrip("/")).resolve()
+    if STATIC_DIR != file_path and STATIC_DIR not in file_path.parents:
+        return b"HTTP/1.1 403 Forbidden\r\n\r\n"
+    if not file_path.is_file():
+        return b"HTTP/1.1 404 Not Found\r\n\r\n"
+    content_type = CONTENT_TYPES.get(file_path.suffix, "application/octet-stream")
+    body = file_path.read_bytes()
+    header = (
+        "HTTP/1.1 200 OK\r\n"
+        f"Content-Type: {content_type}\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode()
+    return header + body
 
 def http_handshake(headers):
     # 1. Read the Sec-WebSocket-Key from the HTTP headers
@@ -73,6 +101,8 @@ async def read_frame(reader):
     elif length == EIGHT_BYTE_LENGTH_FIELD:
         buf = await reader.readexactly(8)
         length = buf[0] << 56 | buf[1] << 48 | buf[2] << 40 | buf[3] << 32 | buf[4] << 24 | buf[5] << 16 | buf[6] << 8 | buf[7]
+    if length > MAX_FRAME_SIZE:
+        raise ValueError(f"frame too large: {length} bytes")
     if mask:
         masking_key = await reader.readexactly(4)
         payload = bytearray(await reader.readexactly(length))
@@ -110,12 +140,14 @@ async def _parse_http_header(reader):
         http_bytes += buf
     http_header = http_bytes.split(b"\r\n\r\n", 1)[0]
     http_header_str = http_header.decode("utf-8", errors="replace")
+    lines = http_header_str.split("\r\n")
+    request_path = lines[0].split(" ")[1] if len(lines[0].split(" ")) >= 2 else "/"
     headers = {}
-    for line in http_header_str.split("\r\n")[1:]:
+    for line in lines[1:]:
         if ": " in line:
             key, value = line.split(": ", 1)
             headers[key] = value
-    return headers
+    return request_path, headers
 
 async def wait_first(tasks):
     first_completed_task, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -127,57 +159,62 @@ async def wait_first(tasks):
             pass
     return first_completed_task
 
-async def _on_ssh_output(data, ctx):
-    write_frame(ctx, data, 0x2)
-    await ctx.drain()
+async def _do_handshake(reader, writer):
+    path, headers = await _parse_http_header(reader)
+    response = http_handshake(headers)
+    if response is None:
+        writer.write(http_static_response(path))
+        await writer.drain()
+        return False
+    writer.write(response)
+    await writer.drain()
+    return True
+
+async def _handle_client_frame(session, opcode, payload, writer):
+    if opcode == 0x8:
+        return False
+    if opcode == 0x1:
+        msg = json.loads(payload)
+        if msg.get('type') == 'resize':
+            await session.resize(msg['cols'], msg['rows'])
+    elif opcode == 0x2:
+        await session.write(payload)
+    elif opcode == 0x9:
+        write_frame(writer, payload, 0xA)
+    return True
 
 async def tcp_connection_callback(reader, writer):
     session = None
+
+    def on_ssh_output(data, ctx):
+        write_frame(writer, data, 0x2)
+
     try:
-        http_headers = await _parse_http_header(reader)
-        handshake = http_handshake(http_headers)
-        if handshake is None:  # not a WebSocket upgrade — ignore
+        if not await _do_handshake(reader, writer):
             return
-        writer.write(handshake)
-        await writer.drain()
         session = session_state.ssh_session
         if session is None:
             write_frame(writer, b"", 0x8)
             await writer.drain()
             return
-        session.subscribe(_on_ssh_output, writer)
+        session.subscribe(on_ssh_output)
         while True:
             session_changed = session_state.ssh_session_changed
             read_task = asyncio.create_task(read_frame(reader))
             changed_task = asyncio.create_task(session_changed.wait())
             first_completed_task = await wait_first([read_task, changed_task])
             if changed_task in first_completed_task:
-                session = session_state.ssh_session
-                if session is None:
-                    write_frame(writer, b"", 0x8)
-                    await writer.drain()
-                    break
-                session.subscribe(_on_ssh_output, writer)
-                continue
-            opcode, payload = read_task.result()
-            if opcode == 0x8:
                 break
-            elif opcode == 0x1:
-                msg = json.loads(payload)
-                if msg.get('type') == 'resize':
-                    await session.resize(msg['cols'], msg['rows'])
-            elif opcode == 0x2:
-                await session.write(payload)
-            elif opcode == 0x9:
-                write_frame(writer, payload, 0xA)
-                await writer.drain()
+            opcode, payload = read_task.result()
+            if not await _handle_client_frame(session, opcode, payload, writer):
+                break
     except asyncio.IncompleteReadError:
         pass
     except Exception as e:
         print(f"Error reading frame: {e}", file=sys.stderr, flush=True)
     finally:
         if session is not None:
-            session.unsubscribe(_on_ssh_output)
+            session.unsubscribe(on_ssh_output)
         writer.close()
 
 async def start_web_socket_server():

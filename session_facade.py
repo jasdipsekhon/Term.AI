@@ -38,6 +38,7 @@ async def open_ssh_session(host, username, password):
     global ssh_session, _host, _username
     async with _lock:
         if ssh_session is not None:
+            ssh_session.ssh_client.on_disconnect = None 
             try:
                 await ssh_session.close()
             except Exception:

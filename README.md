@@ -21,7 +21,7 @@ A live terminal view is available in your browser at `http://127.0.0.1:8765` whi
 ## Requirements
 
 - Windows 10/11
-- [Python 3.10 or later](https://www.python.org/downloads/) — during install, check **"Add Python to PATH"**
+- [Python 3.11 or later](https://www.python.org/downloads/) — during install, check **"Add Python to PATH"**
 - [Claude Desktop](https://claude.ai/download)
 
 ## Setup
@@ -42,9 +42,7 @@ Fully quit (right-click tray icon → Quit) and reopen. Term.AI will appear unde
 
 In a Claude Desktop chat, ask Claude to connect to your device:
 
-> "Connect to 192.168.1.100 as admin, pw: root, and run whoami."
-
-Use Term.AI MCP server to open an SSH session with 192.168.11.230 as builder, password: root
+> "Use Term.AI MCP server to open an SSH session with 192.168.11.230 as builder, password: root, and run whoami."
 
 Claude will use the SSH tools automatically. Open `http://127.0.0.1:8765` in a browser to watch the terminal live.
 

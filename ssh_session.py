@@ -1,5 +1,6 @@
 import pyte
 import asyncio
+import codecs
 from ssh_client import SSHClient
 
 
@@ -13,12 +14,11 @@ class SSHSession:
         self.ssh_client = None
         self.screen = pyte.HistoryScreen(cols, rows, history=10000)  # deque of lines; each line is a dict of column_index -> Char
         self.stream = pyte.Stream(self.screen)  # parses raw bytes and updates screen
-        self.subscriber = None  # (callback, ctx) for the connected browser viewer
-        self.tasks = set()      # asyncio tasks for subscriber callbacks
+        self.subscriber = None  # (callback, ctx) — synchronous sink for SSH output
+        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace") # incremental decoder for UTF-8 bytes to string, replacing invalid sequences with U+FFFD
 
     def _on_data(self, data):
-        bytes_to_str = data.decode("utf-8", errors="replace")
-        self.stream.feed(bytes_to_str)
+        self.stream.feed(self.decoder.decode(data))
         self._notify_subscriber(data)
 
     async def start_ssh_client(self):
@@ -37,8 +37,6 @@ class SSHSession:
             await self.ssh_client.send_command(data)
 
     async def close(self):
-        for task in list(self.tasks):
-                task.cancel()
         if self.ssh_client:
             await self.ssh_client.close()
 
@@ -101,6 +99,4 @@ class SSHSession:
         if self.subscriber is None:
             return
         callback, ctx = self.subscriber
-        task = asyncio.create_task(callback(data, ctx))
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        callback(data, ctx)

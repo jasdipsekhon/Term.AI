@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8" />
     <title>Term.AI</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <link rel="stylesheet" href="xterm.css" />
+    <script src="xterm.js"></script>
+    <script src="xterm-addon-fit.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { height: 100%; background: #1e1e1e; color: #d4d4d4; font-family: monospace; }
@@ -48,6 +48,24 @@
         term.loadAddon(fit);
 
         let ws = null;
+        let reconnectDelay = 1000;
+        const MAX_RECONNECT_DELAY = 5000;
+
+        function connect() {
+            ws = new WebSocket('ws://127.0.0.1:8765');
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                reconnectDelay = 1000;
+                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+                term.focus();
+            };
+            ws.onmessage = (e) => term.write(new Uint8Array(e.data));
+            ws.onclose = () => {
+                setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+            };
+        }
 
         function openTerminal() {
             document.getElementById('overlay').style.display = 'none';
@@ -55,21 +73,7 @@
             termEl.style.display = 'block';
             term.open(termEl);
             fit.fit();
-
-            ws = new WebSocket('ws://127.0.0.1:8765');
-            ws.binaryType = 'arraybuffer';
-
-            ws.onopen = () => {
-                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-                term.focus();
-            };
-            ws.onmessage = (e) => term.write(new Uint8Array(e.data));
-            ws.onclose = () => {
-                term.write('\r\n\x1b[31mDisconnected.\x1b[0m\r\n');
-                document.getElementById('overlay').style.display = 'flex';
-                document.getElementById('terminal').style.display = 'none';
-                document.getElementById('error').textContent = '';
-            };
+            connect();
         }
 
         window.addEventListener('resize', () => {
