@@ -1,7 +1,7 @@
 ﻿from mcp.server.fastmcp import FastMCP
-import session_state
+import session_facade as session_state
 
-mcp = FastMCP("Term.AI")
+mcp = FastMCP("Term.AI", description="AI-assisted SSH terminal — share a live shell with Claude")
 
 
 @mcp.tool()
@@ -34,15 +34,15 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
     If timed_out is True and the command is hanging, call this tool with text="\x03" (Ctrl+C / ETX) to interrupt it.
     For interactive prompts (sudo password, y/n confirmations), send just the response as text.
     """
-    ssh_session = session_state._session
-    if ssh_session is None:
+    session = session_state.ssh_session
+    if session is None:
         return {"ok": False, "reason": "No active SSH session"}
     try:
-        output_start_line_index = ssh_session.line_count()
-        await ssh_session.write((text + "\n").encode())
-        result = await ssh_session.wait_until_idle(timeout_s=timeout)
+        output_start_line_index = session.line_count()
+        await session.write((text + "\n").encode())
+        result = await session.wait_until_idle(timeout_s=timeout)
         timed_out = not result["done"]
-        output = ssh_session.get_output_since(output_start_line_index).strip()
+        output = session.get_output_since(output_start_line_index).strip()
         return {"ok": True, "output": output, "timed_out": timed_out}
     except Exception as e:
         return {"ok": False, "reason": str(e)}
@@ -56,7 +56,7 @@ async def session_status():
     or {"active": False} if no session is open.
     Call this before write_and_read_response if unsure whether a session exists.
     """
-    if session_state._session is None:
+    if session_state.ssh_session is None:
         return {"active": False}
     return {"active": True, "host": session_state._host, "username": session_state._username}
 

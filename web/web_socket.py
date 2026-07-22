@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import base64
-import session_state
+import session_facade as session_state
 
 """
 Flow:
@@ -127,30 +127,30 @@ async def tcp_connection_callback(reader, writer):
     http_headers = await _parse_http_header(reader)
     writer.write(http_handshake(http_headers))
     await writer.drain()
-    if session_state._session is None:
+    if session_state.ssh_session is None:
         write_frame(writer, b"", 0x8)
         await writer.drain()
         writer.close()
         return
-    session_state._session.subscribe(_on_ssh_output, writer)
+    session_state.ssh_session.subscribe(_on_ssh_output, writer)
     try:
         while True:
-            session_changed = session_state._session_changed
+            session_changed = session_state.ssh_session_changed
             read_task = asyncio.create_task(read_frame(reader))
             changed_task = asyncio.create_task(session_changed.wait())
             first_completed_task = await wait_first([read_task, changed_task])
             if changed_task in first_completed_task:
-                if session_state._session is None:
+                if session_state.ssh_session is None:
                     write_frame(writer, b"", 0x8)
                     await writer.drain()
                     break
-                session_state._session.subscribe(_on_ssh_output, writer)
+                session_state.ssh_session.subscribe(_on_ssh_output, writer)
                 continue
             opcode, payload = read_task.result()
             if opcode == 0x8:
                 break
             elif opcode == 0x1 or opcode == 0x2:
-                await session_state._session.write(payload)
+                await session_state.ssh_session.write(payload)
             elif opcode == 0x9:
                 write_frame(writer, payload, 0xA)
                 await writer.drain()
@@ -159,8 +159,8 @@ async def tcp_connection_callback(reader, writer):
     except Exception as e:
         print(f"Error reading frame: {e}", flush=True)
     finally:
-        if session_state._session is not None:
-            session_state._session.unsubscribe(_on_ssh_output)
+        if session_state.ssh_session is not None:
+            session_state.ssh_session.unsubscribe(_on_ssh_output)
         writer.close()
 
 async def start_web_socket_server():

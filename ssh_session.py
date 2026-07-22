@@ -3,7 +3,7 @@ import asyncio
 from ssh_client import SSHClient
 
 
-class Session:
+class SSHSession:
     def __init__(self, host, username, password, cols=80, rows=24):
         self.host = host
         self.username = username
@@ -16,6 +16,11 @@ class Session:
         self.subscribers = [] # websocket subscribers
         self.tasks = set()    # asyncio tasks for subscriber callbacks
 
+    def _on_data(self, data):
+        bytes_to_str = data.decode("utf-8", errors="replace")
+        self.stream.feed(bytes_to_str)
+        self._notify_subscribers(data)
+
     async def start_ssh_client(self):
         self.ssh_client = SSHClient(self.host, self.username, self.password, self._on_data)
         await self.ssh_client.connect()
@@ -26,11 +31,6 @@ class Session:
         self.screen.resize(height, width)
         if self.ssh_client:
             await self.ssh_client.resize(width, height)
-
-    def _on_data(self, data):
-        bytes_to_str = data.decode("utf-8", errors="replace")
-        self.stream.feed(bytes_to_str)
-        self._notify_subscribers(data)
 
     async def write(self, data):
         if self.ssh_client:

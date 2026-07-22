@@ -1,13 +1,13 @@
 import asyncio
 import unittest
 from unittest.mock import patch
-from session import Session
+from ssh_session import SSHSession
 from web.web_socket import read_frame, write_frame
 
 
 def make_session():
     with patch("session.SSHClient"):
-        s = Session("host", "user", "pass")
+        s = SSHSession("host", "user", "pass")
     return s
 
 class TestWebSocketReadFrameUnmasked(unittest.IsolatedAsyncioTestCase):
