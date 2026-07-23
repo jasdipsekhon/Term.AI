@@ -13,10 +13,13 @@ A live terminal view is available in your browser at `http://127.0.0.1:8765` whi
 
 ## Architecture
 
-`Session` is a facade that combines three components behind a single interface:
+`SSHSession` combines three components behind a single interface:
 - **SSH** — connects to the remote device via asyncssh
 - **pyte** — emulates the terminal, tracking what's on screen and in scrollback history
-- **WebSocket** — notifies browser subscribers when new output arrives
+- **subscriber** — notifies the connected browser viewer when new output arrives
+
+`session_facade.py` holds the single active `SSHSession` and is the shared entry point
+both the MCP tools and the WebSocket server use to reach it.
 
 ## Requirements
 

@@ -4,6 +4,22 @@ import codecs
 from ssh_client import SSHClient
 
 
+class _TrackedHistoryScreen(pyte.HistoryScreen):
+    # pyte discards history.top on a scrollback clear so we need to track the # of lines produced/discarded
+    def __init__(self, *args, **kwargs):
+        self.lines_produced = 0
+        self.lines_discarded = 0
+        super().__init__(*args, **kwargs)
+
+    def index(self):
+        self.lines_produced += 1
+        super().index()
+
+    def _reset_history(self):
+        self.lines_discarded = self.lines_produced
+        super()._reset_history()
+
+
 class SSHSession:
     def __init__(self, host, username, password, cols=80, rows=24):
         self.host = host
@@ -12,9 +28,9 @@ class SSHSession:
         self.cols = cols
         self.rows = rows
         self.ssh_client = None
-        self.screen = pyte.HistoryScreen(cols, rows, history=10000)  # deque of lines; each line is a dict of column_index -> Char
+        self.screen = _TrackedHistoryScreen(cols, rows, history=10000)  # deque of lines; each line is a dict of column_index -> Char
         self.stream = pyte.Stream(self.screen)  # parses raw bytes and updates screen
-        self.subscriber = None  # (callback, ctx) — synchronous sink for SSH output
+        self.subscriber = None  # synchronous callback for SSH output
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace") # incremental decoder for UTF-8 bytes to string, replacing invalid sequences with U+FFFD
 
     def _on_data(self, data):
@@ -43,7 +59,7 @@ class SSHSession:
     # ── Pyte interface ──────────────────────────────────────────────────
 
     def line_count(self):
-        return len(self.screen.history.top) + self.screen.cursor.y
+        return self.screen.lines_produced
 
     def convert_screen_list_to_string(self):
         return "\n".join(self.screen.display)
@@ -81,7 +97,8 @@ class SSHSession:
             row = row.rstrip()
             visible.append(row)
         whole_screen = history + visible
-        lines_after_start = whole_screen[start_line:]
+        local_start = max(0, start_line - self.screen.lines_discarded)
+        lines_after_start = whole_screen[local_start:]
         while lines_after_start and not lines_after_start[-1]:
             lines_after_start.pop()
         return "\n".join(lines_after_start)
@@ -89,14 +106,12 @@ class SSHSession:
 
     # ── WebSocket interface ──────────────────────────────────────────────────
 
-    def subscribe(self, subscriber, ctx=None):
-        self.subscriber = (subscriber, ctx)
+    def subscribe(self, subscriber):
+        self.subscriber = subscriber
 
-    def unsubscribe(self, subscriber):
+    def unsubscribe(self):
         self.subscriber = None
 
     def _notify_subscriber(self, data):
-        if self.subscriber is None:
-            return
-        callback, ctx = self.subscriber
-        callback(data, ctx)
+        if self.subscriber is not None:
+            self.subscriber(data)

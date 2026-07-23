@@ -52,7 +52,7 @@ class TestOnData(unittest.TestCase):
         s = make_session()
         received = []
 
-        def cb(data, ctx):
+        def cb(data):
             received.append(data)
 
         s.subscribe(cb)

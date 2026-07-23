@@ -4,7 +4,7 @@ import base64
 import json
 import sys
 from pathlib import Path
-import session_facade as session_state
+import session_facade
 
 """
 Flow:
@@ -17,14 +17,14 @@ RECV_BUF = 4096
 TWO_BYTE_LENGTH_FIELD = 126
 EIGHT_BYTE_LENGTH_FIELD = 127
 MAX_FRAME_SIZE = 16 * 1024 * 1024  # 16 MB cap
+MAX_HEADER_SIZE = 16 * 1024  # 16 KB cap
+MAX_TERMINAL_SIZE = 1000
 
 magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
-    ".js": "application/javascript",
-    ".css": "text/css",
 }
 
 def http_static_response(path):
@@ -138,6 +138,8 @@ async def _parse_http_header(reader):
         if not buf:  # EOF — client disconnected before completing the header
             raise asyncio.IncompleteReadError(http_bytes, None)
         http_bytes += buf
+        if len(http_bytes) > MAX_HEADER_SIZE:
+            raise ValueError(f"HTTP header too large: {len(http_bytes)} bytes")
     http_header = http_bytes.split(b"\r\n\r\n", 1)[0]
     http_header_str = http_header.decode("utf-8", errors="replace")
     lines = http_header_str.split("\r\n")
@@ -176,7 +178,10 @@ async def _handle_client_frame(session, opcode, payload, writer):
     if opcode == 0x1:
         msg = json.loads(payload)
         if msg.get('type') == 'resize':
-            await session.resize(msg['cols'], msg['rows'])
+            cols, rows = msg.get('cols'), msg.get('rows')
+            if (isinstance(cols, int) and isinstance(rows, int)
+                    and 1 <= cols <= MAX_TERMINAL_SIZE and 1 <= rows <= MAX_TERMINAL_SIZE):
+                await session.resize(cols, rows)
     elif opcode == 0x2:
         await session.write(payload)
     elif opcode == 0x9:
@@ -186,20 +191,20 @@ async def _handle_client_frame(session, opcode, payload, writer):
 async def tcp_connection_callback(reader, writer):
     session = None
 
-    def on_ssh_output(data, ctx):
+    def on_ssh_output(data):
         write_frame(writer, data, 0x2)
 
     try:
         if not await _do_handshake(reader, writer):
             return
-        session = session_state.ssh_session
+        session = session_facade.ssh_session
         if session is None:
             write_frame(writer, b"", 0x8)
             await writer.drain()
             return
         session.subscribe(on_ssh_output)
         while True:
-            session_changed = session_state.ssh_session_changed
+            session_changed = session_facade.ssh_session_changed
             read_task = asyncio.create_task(read_frame(reader))
             changed_task = asyncio.create_task(session_changed.wait())
             first_completed_task = await wait_first([read_task, changed_task])
@@ -214,7 +219,7 @@ async def tcp_connection_callback(reader, writer):
         print(f"Error reading frame: {e}", file=sys.stderr, flush=True)
     finally:
         if session is not None:
-            session.unsubscribe(on_ssh_output)
+            session.unsubscribe()
         writer.close()
 
 async def start_web_socket_server():

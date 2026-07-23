@@ -7,15 +7,14 @@ async def main():
     web_task = asyncio.create_task(start_web_socket_server())
     mcp_task = asyncio.create_task(mcp.run_stdio_async())
     try:
-        await asyncio.wait([web_task, mcp_task], return_when=asyncio.FIRST_COMPLETED)
+        await mcp_task
     finally:
-        for task in (web_task, mcp_task):
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+        if not web_task.done():
+            web_task.cancel()
+            try:
+                await web_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 def run():

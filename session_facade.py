@@ -23,22 +23,11 @@ def status():
     return {"active": True, "host": _host, "username": _username}
 
 
-def _make_disconnect_handler(session):
-    def handler():
-        global ssh_session, _host, _username
-        if ssh_session is session:
-            ssh_session = None
-            _host = None
-            _username = None
-            notify_ssh_session_changed()
-    return handler
-
-
 async def open_ssh_session(host, username, password):
     global ssh_session, _host, _username
     async with _lock:
         if ssh_session is not None:
-            ssh_session.ssh_client.on_disconnect = None 
+            ssh_session.ssh_client.on_disconnect = None
             try:
                 await ssh_session.close()
             except Exception:
@@ -47,11 +36,21 @@ async def open_ssh_session(host, username, password):
         try:
             new_ssh_session = SSHSession(host, username, password)
             await new_ssh_session.start_ssh_client()
-            new_ssh_session.ssh_client.on_disconnect = _make_disconnect_handler(new_ssh_session)
+
+            def on_disconnect():
+                global ssh_session, _host, _username
+                if ssh_session is new_ssh_session:
+                    ssh_session = None
+                    _host = None
+                    _username = None
+                    notify_ssh_session_changed()
+
+            new_ssh_session.ssh_client.on_disconnect = on_disconnect
             ssh_session = new_ssh_session
             _host = host
             _username = username
             notify_ssh_session_changed()
             return {"ok": True}
         except Exception as e:
+            notify_ssh_session_changed()
             return {"ok": False, "reason": str(e)}
