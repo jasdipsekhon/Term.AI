@@ -25,9 +25,6 @@ candidates = store_config_paths + [regular_config_path]
 config_path = next((p for p in candidates if os.path.exists(p)), None)
 
 if config_path is None:
-    # Neither config file exists yet -- first-time setup. Prefer the Store
-    # install if its package folder exists, even though it hasn't created its
-    # config file yet (that only happens the first time the app itself runs).
     store_package_dirs = glob.glob(os.path.join(localappdata, "Packages", "Claude_*"))
     if store_package_dirs:
         config_path = os.path.join(store_package_dirs[0], "LocalCache", "Roaming", "Claude", "claude_desktop_config.json")

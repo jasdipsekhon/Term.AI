@@ -19,6 +19,17 @@ class _TrackedHistoryScreen(pyte.HistoryScreen):
         self.lines_discarded = self.lines_produced
         super()._reset_history()
 
+    def resize(self, lines=None, columns=None):
+        # Shrinking drops rows from the top of the buffer (screens.py Screen.resize)
+        # without going through index()/history, so bank the same way as a reset.
+        target_lines = lines or self.lines
+        if target_lines < self.lines:
+            self.lines_discarded += self.lines - target_lines
+        super().resize(lines, columns)
+        # pyte doesn't clamp cursor.y to the new (smaller) row count, which throws
+        # off index()'s cursor.y == bottom scroll detection for the next line fed.
+        self.cursor.y = min(self.cursor.y, self.lines - 1)
+
 
 class SSHSession:
     def __init__(self, host, username, password, cols=80, rows=24):
@@ -63,6 +74,14 @@ class SSHSession:
 
     def convert_screen_list_to_string(self):
         return "\n".join(self.screen.display)
+
+    def get_screen_snapshot(self):
+        # Redraw the current visible screen for a browser that's just connecting to
+        # an already-running session, which otherwise only sees output from this point on.
+        text = "\r\n".join(self.screen.display)
+        cursor_y = self.screen.cursor.y
+        cursor_x = self.screen.cursor.x
+        return f"\x1b[2J\x1b[H{text}\x1b[{cursor_y + 1};{cursor_x + 1}H".encode()
     
     async def wait_until_idle(self, timeout_s=30, idle_s=0.3):
         idle = False

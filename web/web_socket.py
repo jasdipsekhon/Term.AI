@@ -25,6 +25,8 @@ magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript",
+    ".css": "text/css",
 }
 
 def http_static_response(path):
@@ -135,7 +137,7 @@ async def _parse_http_header(reader):
     http_bytes = b""
     while b"\r\n\r\n" not in http_bytes:
         buf = await reader.read(RECV_BUF)
-        if not buf:  # EOF — client disconnected before completing the header
+        if not buf:  
             raise asyncio.IncompleteReadError(http_bytes, None)
         http_bytes += buf
         if len(http_bytes) > MAX_HEADER_SIZE:
@@ -143,7 +145,10 @@ async def _parse_http_header(reader):
     http_header = http_bytes.split(b"\r\n\r\n", 1)[0]
     http_header_str = http_header.decode("utf-8", errors="replace")
     lines = http_header_str.split("\r\n")
-    request_path = lines[0].split(" ")[1] if len(lines[0].split(" ")) >= 2 else "/"
+    if len(lines[0].split(" ")) >= 2:
+        request_path = lines[0].split(" ")[1] 
+    else:
+        request_path = "/"
     headers = {}
     for line in lines[1:]:
         if ": " in line:
@@ -203,6 +208,8 @@ async def tcp_connection_callback(reader, writer):
             await writer.drain()
             return
         session.subscribe(on_ssh_output)
+        write_frame(writer, session.get_screen_snapshot(), 0x2)
+        await writer.drain()
         while True:
             session_changed = session_facade.ssh_session_changed
             read_task = asyncio.create_task(read_frame(reader))

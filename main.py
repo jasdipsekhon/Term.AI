@@ -1,6 +1,33 @@
 import asyncio
+import os
+import signal
+import time
 from mcp_server import mcp
 from web.web_socket import start_web_socket_server
+
+PIDFILE = os.path.join(os.environ.get("LOCALAPPDATA", "."), "Term.AI", "server.pid")
+
+
+def _kill_stale_instance():
+    if not os.path.exists(PIDFILE):
+        return
+    try:
+        old_pid = int(open(PIDFILE).read().strip())
+    except (ValueError, OSError):
+        return
+    if old_pid == os.getpid():
+        return
+    try:
+        os.kill(old_pid, signal.SIGTERM)
+        time.sleep(1)
+    except OSError:
+        pass
+
+
+def _write_pidfile():
+    os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
+    with open(PIDFILE, "w") as f:
+        f.write(str(os.getpid()))
 
 
 async def main():
@@ -18,6 +45,8 @@ async def main():
 
 
 def run():
+    _kill_stale_instance()
+    _write_pidfile()
     asyncio.run(main())
 
 
