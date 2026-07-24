@@ -25,8 +25,6 @@ magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
-    ".js": "application/javascript",
-    ".css": "text/css",
 }
 
 def http_static_response(path):
