@@ -41,7 +41,7 @@ class SSHSession:
         self.ssh_client = None
         self.screen = _TrackedHistoryScreen(cols, rows, history=10000)  # deque of lines; each line is a dict of column_index -> Char
         self.stream = pyte.Stream(self.screen)  # parses raw bytes and updates screen
-        self.subscriber = None  # synchronous callback for SSH output
+        self.subscribers = set()  # synchronous callbacks for SSH output, one per connected client
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace") # incremental decoder for UTF-8 bytes to string, replacing invalid sequences with U+FFFD
 
     def _on_data(self, data):
@@ -81,7 +81,7 @@ class SSHSession:
         text = "\r\n".join(line.rstrip() for line in self.screen.display)
         cursor_y = self.screen.cursor.y
         cursor_x = self.screen.cursor.x
-        return f"\x1b[2J\x1b[H{text}\x1b[{cursor_y + 1};{cursor_x + 1}H".encode()
+        return f"\x1b[3J\x1b[2J\x1b[H{text}\x1b[{cursor_y + 1};{cursor_x + 1}H".encode()
     
     async def wait_until_idle(self, timeout_s=30, idle_s=0.3):
         idle = False
@@ -126,11 +126,11 @@ class SSHSession:
     # ── WebSocket interface ──────────────────────────────────────────────────
 
     def subscribe(self, subscriber):
-        self.subscriber = subscriber
+        self.subscribers.add(subscriber)
 
-    def unsubscribe(self):
-        self.subscriber = None
+    def unsubscribe(self, subscriber):
+        self.subscribers.discard(subscriber)
 
     def _notify_subscriber(self, data):
-        if self.subscriber is not None:
-            self.subscriber(data)
+        for subscriber in self.subscribers:
+            subscriber(data)

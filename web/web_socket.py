@@ -183,12 +183,20 @@ async def _handle_client_frame(session, opcode, payload, writer):
     if opcode == 0x8:
         return False
     if opcode == 0x1:
-        msg = json.loads(payload)
+        try:
+            msg = json.loads(payload)
+        except json.JSONDecodeError:
+            return True
         if msg.get('type') == 'resize':
             cols, rows = msg.get('cols'), msg.get('rows')
             if (isinstance(cols, int) and isinstance(rows, int)
                     and 1 <= cols <= MAX_TERMINAL_SIZE and 1 <= rows <= MAX_TERMINAL_SIZE):
                 await session.resize(cols, rows)
+        elif msg.get('type') == 'end_session':
+            await session_facade.end_session()
+            write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
+            await writer.drain()
+            return False
     elif opcode == 0x2:
         await session.write(payload)
     elif opcode == 0x9:
@@ -233,7 +241,7 @@ async def tcp_connection_callback(reader, writer):
         print(f"Error reading frame: {e}", file=sys.stderr, flush=True)
     finally:
         if session is not None:
-            session.unsubscribe()
+            session.unsubscribe(on_ssh_output)
         writer.close()
 
 async def start_web_socket_server():
