@@ -4,9 +4,10 @@ Control remote devices over SSH directly from Claude Desktop.
 
 ## What it does
 
-Gives Claude Desktop three tools:
+Gives Claude Desktop four tools:
 - **open_session** — connect to a device via SSH
 - **write_and_read_response** — run a command and get the output
+- **end_session** — close the active session without opening a new one
 - **session_status** — check whether a session is currently active
 
 A live terminal view is available in your browser at `http://127.0.0.1:8765` while a session is open.
@@ -20,6 +21,8 @@ A live terminal view is available in your browser at `http://127.0.0.1:8765` whi
 
 `session_facade.py` holds the single active `SSHSession` and is the shared entry point
 both the MCP tools and the WebSocket server use to reach it.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design.
 
 ## Requirements
 
@@ -43,7 +46,7 @@ Fully quit (right-click tray icon → Quit) and reopen. Term.AI will appear unde
 
 ## Usage
 
-In a Claude Desktop chat, ask Claude to connect to your device:
+In a Claude Desktop chat, ask Claude to connect to your device — for example:
 
 > "Use Term.AI MCP server to open an SSH session with 192.168.11.230 as builder, password: root, and run whoami."
 

@@ -22,9 +22,9 @@ back — while the human watches live and can take over at any instant.
    |                                                        |
    |  +-----------+   +------------------+   +-----------+  |
    |  | MCP tools |-->| SSHSession       |<->| WebSocket |  |
-   |  | Claude    |   | pyte ·           |   | single    |  |
-   |  | calls     |   | idle detection   |   | subscriber|  |
-   |  |           |   |                  |   |           |  |
+   |  | Claude    |   | pyte ·           |   | one per   |  |
+   |  | calls     |   | done-detection   |   | connected |  |
+   |  |           |   |                  |   | tab       |  |
    |  +-----------+   +--------+---------+   +-----------+  |
    +===========================|============================+
                                | SSH
@@ -57,10 +57,10 @@ browser) call `SSHSession.write()` directly; there is no arbitration layer.
 
 | File | Role |
 |------|------|
-| `ssh_session.py` | `SSHSession` core: pyte emulation (`HistoryScreen`), output notification to the connected browser subscriber, idle done-detection |
-| `ssh_client.py` | asyncssh-based SSH transport with PTY allocation and resize support |
+| `ssh_session.py` | `SSHSession` core: pyte emulation (`HistoryScreen`), output notification to connected browser subscribers, marker- and idle-based done-detection |
+| `ssh_client.py` | asyncssh-based SSH transport with PTY allocation, resize support, and connect-timeout/error normalization |
 | `mcp_server.py` | FastMCP server exposing the MCP tools |
-| `session_facade.py` | Shared `SSHSession` reference, disconnect handler, and session-change event used by both MCP tools and web server |
+| `session_facade.py` | Shared `SSHSession` reference, disconnect handler, session-change event, and session teardown (`end_session`) used by both MCP tools and web server |
 | `web/web_socket.py` | Bare-metal asyncio TCP server — implements WebSocket protocol (RFC 6455) manually; serves the static viewer page over plain HTTP and streams terminal bytes over the WebSocket upgrade on the same port |
 | `web/static/index.html` | xterm.js browser viewer: renders output, sends keystrokes, sends resize events |
 | `main.py` | Entry point — runs MCP server (stdio) and web server (port 8765) concurrently |
@@ -73,7 +73,8 @@ Claude Desktop is the chat front end and the MCP host.
 | Tool | Purpose |
 |------|---------|
 | `open_session` | Open an SSH session to a remote device |
-| `write_and_read_response` | Send a shell command and return its output |
+| `write_and_read_response` | Send a shell command (or raw interactive input) and return its output |
+| `end_session` | Close the active session without opening a new one |
 | `session_status` | Check whether a session is currently active (host, username) |
 
 ## Request lifecycle
@@ -86,8 +87,9 @@ Claude Desktop is the chat front end and the MCP host.
 3. Output splits: `SSHSession._on_data` feeds raw bytes into pyte (updates the
    screen Claude reads) and notifies the connected browser subscriber (live view).
 4. Claude calls `write_and_read_response` — records the current line count, writes
-   the command, waits for idle (no screen change for 0.3 s), then reads everything
-   since the recorded line via `get_output_since`.
+   the command (a shell marker is appended for `is_command=True`, the default), waits
+   for that marker to appear (or, for raw interactive input, waits for idle — no screen
+   change for 0.3 s), then reads everything since the recorded line via `get_output_since`.
 5. If you type in the viewer, your keystrokes go through the WebSocket directly
    to `SSHSession.write()` alongside Claude's writes — no priority mechanism.
 
@@ -96,16 +98,31 @@ Claude Desktop is the chat front end and the MCP host.
 The MCP tools and the browser viewer share one session object via `session_facade`.
 When a new session is created or the SSH connection drops, `session_facade.ssh_session_changed`
 fires; the WebSocket handler closes the connection and the viewer reconnects, picking up
-whichever session is current.
+whichever session is current. The viewer can also end the session itself (its Disconnect
+button sends an `end_session` WebSocket message), which tears down the session for Claude too.
 
 ## Key design decisions
 
 - **Single source of truth.** One SSH PTY; both emulators are read-only
   projections of its output.
-- **Idle done-detection.** `wait_until_idle` polls every 50 ms and returns when
-  the screen buffer stops changing for 0.3 s. Works for interactive programs
-  (`top`, `vim`, REPLs) that a sentinel can't handle. Timeout is configurable
-  per-call.
+- **Marker done-detection for commands, idle done-detection for interactive input.**
+  For `is_command=True` (the default), `write_and_read_response` appends a unique
+  sentinel (`; printf "\n<<DONE:xxxx>>\n"`) after the command and `wait_for_marker`
+  polls until it appears — deterministic even for commands that stay silent for a
+  while (`sleep 30 && echo done`), where pure output-quiescence would falsely report
+  done after the first idle window. `wait_until_idle` (screen buffer stops changing
+  for 0.3 s, polled every 50 ms) is kept for `is_command=False` — raw interactive
+  input (sudo passwords, y/n keypresses, `top`/`vim`/REPLs) where appending a shell
+  sentinel would corrupt the input. Timeout is configurable per-call either way.
+- **Output truncation.** `write_and_read_response` caps returned output at 20,000
+  characters, keeping the most recent output and noting how much was cut, so a
+  command with unexpectedly large output (e.g. hundreds of interfaces) can't blow
+  past a caller's token limit.
+- **Normalized connection errors.** `SSHClient.connect()` wraps the connect attempt
+  in a 10 s timeout and catches `OSError`/`socket.gaierror`, turning raw OS-level
+  messages (e.g. Windows socket error codes) into a consistent
+  `"Could not connect to {host}: ..."` reason. Auth failures (`asyncssh.PermissionDenied`)
+  are left as-is since they're already clean.
 - **History-aware output capture.** `SSHSession` uses `pyte.HistoryScreen`
   (10 000-line scrollback). `get_output_since(line_index)` concatenates history
   and visible lines so Claude sees output that has already scrolled off screen.

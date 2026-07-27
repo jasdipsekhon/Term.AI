@@ -182,25 +182,33 @@ async def _do_handshake(reader, writer):
 async def _handle_client_frame(session, opcode, payload, writer):
     if opcode == 0x8:
         return False
-    if opcode == 0x1:
-        try:
-            msg = json.loads(payload)
-        except json.JSONDecodeError:
-            return True
-        if msg.get('type') == 'resize':
-            cols, rows = msg.get('cols'), msg.get('rows')
-            if (isinstance(cols, int) and isinstance(rows, int)
-                    and 1 <= cols <= MAX_TERMINAL_SIZE and 1 <= rows <= MAX_TERMINAL_SIZE):
-                await session.resize(cols, rows)
-        elif msg.get('type') == 'end_session':
-            await session_facade.end_session()
-            write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
-            await writer.drain()
-            return False
-    elif opcode == 0x2:
-        await session.write(payload)
-    elif opcode == 0x9:
-        write_frame(writer, payload, 0xA)
+    try:
+        if opcode == 0x1:
+            try:
+                msg = json.loads(payload)
+            except json.JSONDecodeError:
+                return True
+            if msg.get('type') == 'resize':
+                cols, rows = msg.get('cols'), msg.get('rows')
+                if (isinstance(cols, int) and isinstance(rows, int)
+                        and 1 <= cols <= MAX_TERMINAL_SIZE and 1 <= rows <= MAX_TERMINAL_SIZE):
+                    await session.resize(cols, rows)
+            elif msg.get('type') == 'end_session':
+                await session_facade.end_session()
+                write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
+                await writer.drain()
+                return False
+        elif opcode == 0x2:
+            await session.write(payload)
+        elif opcode == 0x9:
+            write_frame(writer, payload, 0xA)
+    except Exception:
+        if session_facade.ssh_session is session:
+            raise
+        # session was torn down by another connection while this frame was in flight
+        write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
+        await writer.drain()
+        return False
     return True
 
 async def tcp_connection_callback(reader, writer):
