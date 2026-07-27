@@ -57,7 +57,7 @@ browser) call `SSHSession.write()` directly; there is no arbitration layer.
 
 | File | Role |
 |------|------|
-| `ssh_session.py` | `SSHSession` core: pyte emulation (`HistoryScreen`), output notification to connected browser subscribers, marker- and idle-based done-detection |
+| `ssh_session.py` | `SSHSession` core: pyte emulation (`HistoryScreen`), output notification to connected browser subscribers, idle-based done-detection |
 | `ssh_client.py` | asyncssh-based SSH transport with PTY allocation, resize support, and connect-timeout/error normalization |
 | `mcp_server.py` | FastMCP server exposing the MCP tools |
 | `session_facade.py` | Shared `SSHSession` reference, disconnect handler, session-change event, and session teardown (`end_session`) used by both MCP tools and web server |
@@ -153,6 +153,6 @@ button sends an `end_session` WebSocket message), which tears down the session f
 
 ## Status
 
-Verified end to end: all three MCP tools register; Claude opens SSH session →
+Verified end to end: all four MCP tools register; Claude opens SSH session →
 runs commands → idle detection fires → viewer receives live bytes → browser resize
-events propagate to the PTY.
+events propagate to the PTY → end_session tears it down for both Claude and the viewer.

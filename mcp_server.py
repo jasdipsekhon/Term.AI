@@ -45,8 +45,6 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
     if session is None:
         return {"ok": False, "reason": "No active SSH session"}
     try:
-        # Anchor to where the last call left off, not to "now" -- output that streams in
-        # between calls (while the caller is doing something else) must not be skipped.
         output_start_line_index = session.last_read_line
         if text == "":
             to_send = None
