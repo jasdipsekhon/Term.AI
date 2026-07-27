@@ -240,11 +240,11 @@ class TestWriteAndReadResponseSessionEnded(unittest.IsolatedAsyncioTestCase):
         fake_session.line_count.return_value = 0
         fake_session.write = AsyncMock()
 
-        async def fake_wait_for_marker(marker, timeout_s):
+        async def fake_wait_until_idle(timeout_s=60.0):
             session_facade.ssh_session = None  # simulate end_session firing mid-wait
             return {"done": True}
 
-        fake_session.wait_for_marker = fake_wait_for_marker
+        fake_session.wait_until_idle = fake_wait_until_idle
         session_facade.ssh_session = fake_session
 
         result = await mcp_server.write_and_read_response("ls")
@@ -296,14 +296,11 @@ class TestWriteAndReadResponsePersistentCursor(unittest.IsolatedAsyncioTestCase)
         real_session.ssh_client = MagicMock()
 
         async def fake_send_command(data):
-            text = data.decode()
             real_session._on_data(data)
 
             async def deliver():
                 await asyncio.sleep(0.05)  # lands after this call has already timed out and returned
-                real_session._on_data(b"MARK-OUTPUT\r\n")
-                marker = text.split("<<DONE:")[1].split(">>")[0]
-                real_session._on_data(f"<<DONE:{marker}>>\r\n".encode())
+                real_session._on_data(b"\r\nMARK-OUTPUT\r\n")
 
             asyncio.create_task(deliver())
 
@@ -317,76 +314,8 @@ class TestWriteAndReadResponsePersistentCursor(unittest.IsolatedAsyncioTestCase)
         # used to be lost when output_start_line_index was captured fresh as "now" each call.
         await asyncio.sleep(0.15)
 
-        r2 = await mcp_server.write_and_read_response("", timeout=0.05, is_command=False)
+        r2 = await mcp_server.write_and_read_response("", timeout=0.05)
         self.assertIn("MARK-OUTPUT", r2["output"])
-
-
-class TestWriteAndReadResponseCrossCallMarkerLeak(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self._orig_session = session_facade.ssh_session
-
-    def tearDown(self):
-        session_facade.ssh_session = self._orig_session
-
-    async def test_marker_completed_by_a_later_different_call_is_still_stripped(self):
-        real_session = SSHSession("host", "user", "pass")
-        real_session.ssh_client = MagicMock()
-
-        async def fake_send_command(data):
-            # Echo only -- the command never actually finishes during this call.
-            real_session._on_data(data)
-
-        real_session.ssh_client.send_command = AsyncMock(side_effect=fake_send_command)
-        session_facade.ssh_session = real_session
-
-        r1 = await mcp_server.write_and_read_response("sleep 5 && echo done-for-real", timeout=0.05)
-        self.assertTrue(r1["timed_out"])
-        marker = next(m for m in real_session.pending_markers)
-
-        # The command finishes later, observed by a totally different, later call that
-        # never generated a marker of its own (a plain is_command=False poll).
-        real_session._on_data(b"done-for-real\r\n")
-        real_session._on_data(f"{marker}\r\n".encode())
-        real_session._on_data(b"user@host:~$ ")
-
-        r2 = await mcp_server.write_and_read_response("", timeout=0.05, is_command=False)
-        self.assertNotIn(marker, r2["output"])
-        self.assertIn("done-for-real", r2["output"])
-
-
-class TestWriteAndReadResponseMarkerStripping(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self._orig_session = session_facade.ssh_session
-
-    def tearDown(self):
-        session_facade.ssh_session = self._orig_session
-
-    async def test_strips_echoed_command_and_keeps_real_output(self):
-        real_session = SSHSession("host", "user", "pass")
-        real_session.ssh_client = MagicMock()
-
-        async def fake_send_command(data):
-            # A real PTY echoes back exactly what was sent -- including our injected marker
-            # printf -- before the shell executes it and prints the real output, so the
-            # marker text appears twice in what pyte renders.
-            real_session._on_data(data)
-            real_session._on_data(b"\r\n")
-            real_session._on_data(b"total 4\r\n")
-            real_session._on_data(b"drwxr-xr-x 2 user user 4096 file1\r\n")
-            marker = data.decode().split("<<DONE:")[1].split(">>")[0]
-            real_session._on_data(f"<<DONE:{marker}>>\r\n".encode())
-            real_session._on_data(b"user@host:~$ ")
-
-        real_session.ssh_client.send_command = AsyncMock(side_effect=fake_send_command)
-        session_facade.ssh_session = real_session
-
-        result = await mcp_server.write_and_read_response("ls -la")
-
-        self.assertTrue(result["ok"])
-        self.assertIn("total 4", result["output"])
-        self.assertIn("drwxr-xr-x", result["output"])
-        self.assertNotIn("printf", result["output"])
-        self.assertNotIn("<<DONE:", result["output"])
 
 
 class TestCleanOsErrorMessage(unittest.TestCase):

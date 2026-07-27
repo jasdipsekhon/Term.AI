@@ -87,9 +87,8 @@ Claude Desktop is the chat front end and the MCP host.
 3. Output splits: `SSHSession._on_data` feeds raw bytes into pyte (updates the
    screen Claude reads) and notifies the connected browser subscriber (live view).
 4. Claude calls `write_and_read_response` — records the current line count, writes
-   the command (a shell marker is appended for `is_command=True`, the default), waits
-   for that marker to appear (or, for raw interactive input, waits for idle — no screen
-   change for 0.3 s), then reads everything since the recorded line via `get_output_since`.
+   the text, waits for the screen to go idle (no change for 0.3 s), then reads
+   everything since the recorded line via `get_output_since`.
 5. If you type in the viewer, your keystrokes go through the WebSocket directly
    to `SSHSession.write()` alongside Claude's writes — no priority mechanism.
 
@@ -105,15 +104,14 @@ button sends an `end_session` WebSocket message), which tears down the session f
 
 - **Single source of truth.** One SSH PTY; both emulators are read-only
   projections of its output.
-- **Marker done-detection for commands, idle done-detection for interactive input.**
-  For `is_command=True` (the default), `write_and_read_response` appends a unique
-  sentinel (`; printf "\n<<DONE:xxxx>>\n"`) after the command and `wait_for_marker`
-  polls until it appears — deterministic even for commands that stay silent for a
-  while (`sleep 30 && echo done`), where pure output-quiescence would falsely report
-  done after the first idle window. `wait_until_idle` (screen buffer stops changing
-  for 0.3 s, polled every 50 ms) is kept for `is_command=False` — raw interactive
-  input (sudo passwords, y/n keypresses, `top`/`vim`/REPLs) where appending a shell
-  sentinel would corrupt the input. Timeout is configurable per-call either way.
+- **Idle-based done-detection.** `wait_until_idle` considers the command done once
+  the screen buffer stops changing for 0.3 s (polled every 50 ms). This is simple and
+  works uniformly for both shell commands and raw interactive input (sudo passwords,
+  y/n keypresses, `top`/`vim`/REPLs), but it's a heuristic: a command that stays
+  silent for a while (`sleep 30 && echo done`) can report `timed_out=True` even
+  though it's still running. Pass `text=""` to poll again without sending anything.
+  A per-session `last_read_line` cursor (not "now" at each call) means output that
+  streams in between calls — while the caller is doing something else — isn't lost.
 - **Output truncation.** `write_and_read_response` caps returned output at 20,000
   characters, keeping the most recent output and noting how much was cut, so a
   command with unexpectedly large output (e.g. hundreds of interfaces) can't blow

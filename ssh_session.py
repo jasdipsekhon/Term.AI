@@ -44,7 +44,6 @@ class SSHSession:
         self.subscribers = set()  # synchronous callbacks for SSH output, one per connected client
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace") # incremental decoder for UTF-8 bytes to string, replacing invalid sequences with U+FFFD
         self.last_read_line = 0  # line_count() as of the end of the last write_and_read_response call
-        self.pending_markers = set()  # completion markers sent but not yet confirmed done
 
     def _on_data(self, data):
         self.stream.feed(self.decoder.decode(data))
@@ -101,15 +100,6 @@ class SSHSession:
                 idle = True
                 return {"done": idle}
         return {"done": idle, "reason": "Timeout reached before idle state."}
-
-    async def wait_for_marker(self, marker, timeout_s):
-        current_event_loop = asyncio.get_running_loop()
-        start_time = current_event_loop.time()
-        while current_event_loop.time() - start_time < timeout_s:
-            if any(line.strip() == marker for line in self.screen.display):
-                return {"done": True}
-            await asyncio.sleep(0.05)
-        return {"done": False, "reason": "Timeout reached before completion marker seen."}
 
     def get_output_since(self, start_line):
         history = []
