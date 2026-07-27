@@ -23,16 +23,33 @@ def status():
     return {"active": True, "host": _host, "username": _username}
 
 
+async def _close_current_session():
+    global ssh_session, _host, _username
+    if ssh_session is None:
+        return
+    ssh_session.ssh_client.on_disconnect = None
+    try:
+        await ssh_session.close()
+    except Exception:
+        pass
+    ssh_session = None
+    _host = None
+    _username = None
+
+
+async def end_session():
+    async with _lock:
+        if ssh_session is None:
+            return {"ok": False, "reason": "No active SSH session"}
+        await _close_current_session()
+        notify_ssh_session_changed()
+        return {"ok": True}
+
+
 async def open_ssh_session(host, username, password):
     global ssh_session, _host, _username
     async with _lock:
-        if ssh_session is not None:
-            ssh_session.ssh_client.on_disconnect = None
-            try:
-                await ssh_session.close()
-            except Exception:
-                pass
-            ssh_session = None
+        await _close_current_session()
         try:
             new_ssh_session = SSHSession(host, username, password)
             await new_ssh_session.start_ssh_client()

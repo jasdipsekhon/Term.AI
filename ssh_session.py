@@ -78,7 +78,7 @@ class SSHSession:
     def get_screen_snapshot(self):
         # Redraw the current visible screen for a browser that's just connecting to
         # an already-running session, which otherwise only sees output from this point on.
-        text = "\r\n".join(self.screen.display)
+        text = "\r\n".join(line.rstrip() for line in self.screen.display)
         cursor_y = self.screen.cursor.y
         cursor_x = self.screen.cursor.x
         return f"\x1b[2J\x1b[H{text}\x1b[{cursor_y + 1};{cursor_x + 1}H".encode()

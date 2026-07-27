@@ -19,6 +19,7 @@ EIGHT_BYTE_LENGTH_FIELD = 127
 MAX_FRAME_SIZE = 16 * 1024 * 1024  # 16 MB cap
 MAX_HEADER_SIZE = 16 * 1024  # 16 KB cap
 MAX_TERMINAL_SIZE = 1000
+NO_SESSION_CLOSE_CODE = 4000  # app-defined (RFC 6455 reserves 4000-4999 for this)
 
 magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -131,6 +132,9 @@ def write_frame(writer, data, opcode):
     buf += data
     writer.write(buf)
 
+def write_close_frame(writer, code, reason=""):
+    write_frame(writer, code.to_bytes(2, "big") + reason.encode(), 0x8)
+
 async def _parse_http_header(reader):
     http_bytes = b""
     while b"\r\n\r\n" not in http_bytes:
@@ -202,10 +206,12 @@ async def tcp_connection_callback(reader, writer):
             return
         session = session_facade.ssh_session
         if session is None:
-            write_frame(writer, b"", 0x8)
+            write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
             await writer.drain()
             return
         session.subscribe(on_ssh_output)
+        status = session_facade.status()
+        write_frame(writer, json.dumps({"type": "status", **status}).encode(), 0x1)
         write_frame(writer, session.get_screen_snapshot(), 0x2)
         await writer.drain()
         while True:
@@ -214,6 +220,9 @@ async def tcp_connection_callback(reader, writer):
             changed_task = asyncio.create_task(session_changed.wait())
             first_completed_task = await wait_first([read_task, changed_task])
             if changed_task in first_completed_task:
+                if session_facade.ssh_session is None:
+                    write_close_frame(writer, NO_SESSION_CLOSE_CODE, "no session")
+                    await writer.drain()
                 break
             opcode, payload = read_task.result()
             if not await _handle_client_frame(session, opcode, payload, writer):

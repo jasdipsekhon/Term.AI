@@ -53,6 +53,16 @@ async def write_and_read_response(text: str, timeout: float = 60.0):
 
 
 @mcp.tool()
+async def end_session():
+    """Close the active SSH session without opening a new one.
+    Disconnects the underlying SSH connection and clears the browser terminal view.
+
+    Returns {"ok": True} on success, or {"ok": False, "reason": "..."} if no session is open.
+    """
+    return await session_facade.end_session()
+
+
+@mcp.tool()
 async def session_status():
     """Check whether an SSH session is currently active.
 
