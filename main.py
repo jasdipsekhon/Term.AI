@@ -12,7 +12,8 @@ def _kill_stale_instance():
     if not os.path.exists(PIDFILE):
         return
     try:
-        old_pid = int(open(PIDFILE).read().strip())
+        with open(PIDFILE) as f:
+            old_pid = int(f.read().strip())
     except (ValueError, OSError):
         return
     if old_pid == os.getpid():
@@ -25,9 +26,12 @@ def _kill_stale_instance():
 
 
 def _write_pidfile():
-    os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
-    with open(PIDFILE, "w") as f:
-        f.write(str(os.getpid()))
+    try:
+        os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
+        with open(PIDFILE, "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass
 
 
 async def main():

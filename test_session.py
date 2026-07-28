@@ -1,4 +1,7 @@
 import asyncio
+import os
+import signal
+import tempfile
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
 from ssh_session import SSHSession
@@ -7,6 +10,7 @@ import session_facade
 import mcp_server
 import web.web_socket as web_socket
 from ssh_client import _clean_os_error_message
+import main as main_module
 
 
 def make_session():
@@ -348,6 +352,59 @@ class TestCleanOsErrorMessage(unittest.TestCase):
     def test_leaves_plain_message_unchanged(self):
         e = OSError("connection refused")
         self.assertEqual(_clean_os_error_message(e), "connection refused")
+
+
+class TestMainSingleInstanceGuard(unittest.TestCase):
+    def setUp(self):
+        self._orig_pidfile = main_module.PIDFILE
+        self._tmpdir = tempfile.TemporaryDirectory()
+        main_module.PIDFILE = os.path.join(self._tmpdir.name, "server.pid")
+
+    def tearDown(self):
+        main_module.PIDFILE = self._orig_pidfile
+        self._tmpdir.cleanup()
+
+    def test_write_pidfile_writes_current_pid(self):
+        main_module._write_pidfile()
+        with open(main_module.PIDFILE) as f:
+            self.assertEqual(f.read().strip(), str(os.getpid()))
+
+    def test_write_pidfile_swallows_oserror(self):
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            main_module._write_pidfile()  # must not raise
+
+    def test_kill_stale_instance_noop_when_no_pidfile(self):
+        with patch("os.kill") as mock_kill:
+            main_module._kill_stale_instance()
+        mock_kill.assert_not_called()
+
+    def test_kill_stale_instance_noop_on_garbage_content(self):
+        with open(main_module.PIDFILE, "w") as f:
+            f.write("not-a-pid")
+        with patch("os.kill") as mock_kill:
+            main_module._kill_stale_instance()
+        mock_kill.assert_not_called()
+
+    def test_kill_stale_instance_skips_self(self):
+        with open(main_module.PIDFILE, "w") as f:
+            f.write(str(os.getpid()))
+        with patch("os.kill") as mock_kill:
+            main_module._kill_stale_instance()
+        mock_kill.assert_not_called()
+
+    def test_kill_stale_instance_kills_different_pid(self):
+        with open(main_module.PIDFILE, "w") as f:
+            f.write("99999")
+        with patch("os.kill") as mock_kill, patch("time.sleep") as mock_sleep:
+            main_module._kill_stale_instance()
+        mock_kill.assert_called_once_with(99999, signal.SIGTERM)
+        mock_sleep.assert_called_once()
+
+    def test_kill_stale_instance_swallows_oserror_from_kill(self):
+        with open(main_module.PIDFILE, "w") as f:
+            f.write("99999")
+        with patch("os.kill", side_effect=OSError("no such process")), patch("time.sleep"):
+            main_module._kill_stale_instance()  # must not raise
 
 
 if __name__ == "__main__":
