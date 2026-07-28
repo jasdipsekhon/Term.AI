@@ -121,7 +121,7 @@
         document.getElementById('logo-img').src = LOGO_SVG;
         document.getElementById('session-logo-img').src = LOGO_SVG;
 
-        const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
+        const term = new Terminal({ cursorBlink: true, scrollback: 10000, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
         const fit = new FitAddon.FitAddon();
         term.loadAddon(fit);
         term.loadAddon(new WebLinksAddon.WebLinksAddon((event, uri) => {
