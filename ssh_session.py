@@ -26,8 +26,6 @@ class _TrackedHistoryScreen(pyte.HistoryScreen):
         if target_lines < self.lines:
             self.lines_discarded += self.lines - target_lines
         super().resize(lines, columns)
-        # pyte doesn't clamp cursor.y to the new (smaller) row count, which throws
-        # off index()'s cursor.y == bottom scroll detection for the next line fed.
         self.cursor.y = min(self.cursor.y, self.lines - 1)
 
 

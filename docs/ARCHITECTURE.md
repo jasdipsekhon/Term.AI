@@ -150,9 +150,3 @@ button sends an `end_session` WebSocket message), which tears down the session f
   back via `write_and_read_response`.
 - **Co-pilot** — chat + the browser viewer at `http://127.0.0.1:8765`. Watch live
   and type alongside Claude.
-
-## Status
-
-Verified end to end: all four MCP tools register; Claude opens SSH session →
-runs commands → idle detection fires → viewer receives live bytes → browser resize
-events propagate to the PTY → end_session tears it down for both Claude and the viewer.

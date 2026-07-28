@@ -283,6 +283,22 @@ class TestSessionFacadeOpenPreservesOnFailure(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session_facade._host, "good-host")
         good.close.assert_not_awaited()
 
+    async def test_failed_reconnect_closes_partially_connected_new_session(self):
+        # start_ssh_client() can fail AFTER the underlying connection is already up
+        # (e.g. PTY/session negotiation) -- the half-open new session must be closed,
+        # not just discarded, or the real SSH connection leaks.
+        session_facade.ssh_session = None
+
+        failing_instance = MagicMock()
+        failing_instance.start_ssh_client = AsyncMock(side_effect=ConnectionError("PTY negotiation failed"))
+        failing_instance.close = AsyncMock()
+
+        with patch("session_facade.SSHSession", return_value=failing_instance):
+            result = await session_facade.open_ssh_session("host", "user", "pw")
+
+        self.assertEqual(result, {"ok": False, "reason": "PTY negotiation failed"})
+        failing_instance.close.assert_awaited_once()
+
 
 class TestWriteAndReadResponsePersistentCursor(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

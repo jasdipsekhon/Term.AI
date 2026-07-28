@@ -23,25 +23,17 @@ NO_SESSION_CLOSE_CODE = 4000
 
 magic_UUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-STATIC_DIR = (Path(__file__).parent / "static").resolve()
-CONTENT_TYPES = {
-    ".html": "text/html; charset=utf-8",
-}
+INDEX_HTML_PATH = (Path(__file__).parent / "static" / "index.html").resolve()
 
 def http_static_response(path):
-    if path == "/":
-        path = "/index.html"
+    # The viewer is a single static page -- no other files are ever served.
     path = path.split("?", 1)[0]
-    file_path = (STATIC_DIR / path.lstrip("/")).resolve()
-    if STATIC_DIR != file_path and STATIC_DIR not in file_path.parents:
-        return b"HTTP/1.1 403 Forbidden\r\n\r\n"
-    if not file_path.is_file():
+    if path not in ("/", "/index.html"):
         return b"HTTP/1.1 404 Not Found\r\n\r\n"
-    content_type = CONTENT_TYPES.get(file_path.suffix, "application/octet-stream")
-    body = file_path.read_bytes()
+    body = INDEX_HTML_PATH.read_bytes()
     header = (
         "HTTP/1.1 200 OK\r\n"
-        f"Content-Type: {content_type}\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
         f"Content-Length: {len(body)}\r\n"
         "Connection: close\r\n\r\n"
     ).encode()
